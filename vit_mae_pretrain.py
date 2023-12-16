@@ -12,6 +12,7 @@ import torchvision
 from torchvision import datasets, models, transforms
 import matplotlib.pyplot as plt
 import time
+import math
 
 from torchsummary import summary
 
@@ -34,13 +35,13 @@ import utils.lr_sched as lr_sched
 import argparse
 
 #use fp16
-mixed_precision=False
+mixed_precision=True
 
 #for time correction
 gmt_dst = 2
 
-BATCH_SIZE = 64 if mixed_precision else 5
-ACCUM_ITER = 2#int(4096/BATCH_SIZE)
+BATCH_SIZE = 128 if mixed_precision else 5
+ACCUM_ITER = int(4096/BATCH_SIZE)
 workers = 8
 EPOCHS = 100
 WARMUP_EPOCHS = 1
@@ -130,6 +131,10 @@ def train(args, model, dataloaders, optimizer, loss_scaler, num_epochs=10):
                     loss, pred, mask = model(inputs, mask_ratio=mask_ratio)
 
                 loss_value = loss.item()
+                
+                if not math.isfinite(loss_value):
+                    print("Loss is {}, stopping training".format(loss_value))
+                    quit()
 
                 #save_inference_images(inputs, outputs)
                 loss /= accum_iter
@@ -147,7 +152,7 @@ def train(args, model, dataloaders, optimizer, loss_scaler, num_epochs=10):
                 
                 processed_data += inputs.size(0)
                 running_loss += loss_value * inputs.size(0) #needed???
-                print("loss:", loss_value, "processed_data:", processed_data, "running_loss:", running_loss)
+                #print("loss:", loss_value, "processed_data:", processed_data, "running_loss:", running_loss)
 
                 tepoch.set_postfix(loss=loss_value)
 
@@ -181,7 +186,7 @@ if __name__ == '__main__':
     parser.add_argument("--warmup_epochs", default=WARMUP_EPOCHS, type=int, help="number of warmup_epochs")
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1e-3, metavar='LR',
+    parser.add_argument('--blr', type=float, default=1.5e-4, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
@@ -202,8 +207,11 @@ if __name__ == '__main__':
     if saved_model is not None:
         load_from_file = True
 
+    wandb_config["lr"] = args.lr
+
     #print("base lr: %.2e" % (args.lr * 256 / eff_batch_size))
     print("actual lr: %.2e" % args.lr)
+    print("GPU Batch size", args.batch_size)
     print("accumulate grad iterations: %d" % args.accum_iter)
     print("effective batch size: %d" % eff_batch_size)
 
@@ -239,7 +247,7 @@ if __name__ == '__main__':
     #print("Image size:", size)
     # 224/16 = 14
     # 14*14 = 196 - number of patches
-
+    
     #Loading dataset - like Imagenet, where 1k folders with each classes
     data_transforms = transforms.Compose([
         transforms.RandomResizedCrop(input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
@@ -247,7 +255,7 @@ if __name__ == '__main__':
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-    imagenet_train_data = torchvision.datasets.ImageFolder(os.path.join(imagenet_dir, 'train_100'), transform=data_transforms)
+    imagenet_train_data = torchvision.datasets.ImageFolder(os.path.join(imagenet_dir, 'train'), transform=data_transforms)
     data_loaders = torch.utils.data.DataLoader(imagenet_train_data, batch_size=args.batch_size, shuffle=True, num_workers=workers)
     dataset_sizes = len(imagenet_train_data)
     class_names = imagenet_train_data.classes
