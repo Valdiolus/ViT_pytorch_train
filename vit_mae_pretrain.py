@@ -103,11 +103,11 @@ def train(args, model, dataloaders, optimizer, loss_scaler, num_epochs=10):
     else:
         time_struct = time.gmtime()
         time_now = str(time_struct.tm_year)+'-'+str(time_struct.tm_mon)+'-'+str(time_struct.tm_mday)+'_'+str(time_struct.tm_hour+gmt_dst)+'-'+str(time_struct.tm_min)+'-'+str(time_struct.tm_sec)
-        print("New train:",  model_type+'_'+time_now)
+        print("New train:",  model_type+'_pt_'+time_now)
         wandb_saved_id = wandb.util.generate_id()
         args.wandb_id = wandb_saved_id
-        wandb.init(id=wandb_saved_id, resume=True, project="ViT MAE Pretrain", name = model_type+'_'+time_now, config=wandb_config)
-        train_path = os.path.join(PATH_TO_SAVE, model_type+'_'+time_now)
+        wandb.init(id=wandb_saved_id, resume=True, project="ViT MAE Pretrain", name = model_type+'_pt_'+time_now, config=wandb_config)
+        train_path = os.path.join(PATH_TO_SAVE, model_type+'_pt_'+time_now)
         if not os.path.exists(train_path):
             os.makedirs(train_path)
 

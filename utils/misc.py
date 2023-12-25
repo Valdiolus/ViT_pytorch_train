@@ -305,7 +305,7 @@ def save_model(args, epoch, model, optimizer, loss_scaler, output_dir, save_best
             'epoch': epoch,
             'scaler': deepcopy(loss_scaler.state_dict()),
             'wandb_id': args.wandb_id,
-            'best_loss': args.best_loss,
+            'best_loss': args.best_par,
         }
     else:
         to_save = {
@@ -314,7 +314,7 @@ def save_model(args, epoch, model, optimizer, loss_scaler, output_dir, save_best
             'epoch': epoch,
             #'scaler': loss_scaler.state_dict(),
             'wandb_id': args.wandb_id,
-            'best_loss': args.best_loss,
+            'best_loss': args.best_par,
         }
     #save_on_master(to_save, checkpoint_path)
     torch.save(to_save, os.path.join(output_dir, "last.pt"))
@@ -329,8 +329,8 @@ def load_model(args, model, optimizer, loss_scaler):
         model.load_state_dict(checkpoint['model'])
         print("Resume checkpoint %s" % args.resume)
         if checkpoint['best_loss']:
-            args.best_loss = checkpoint['best_loss']
-            print("Best loss: %.4f" % args.best_loss)
+            args.best_par = checkpoint['best_loss']
+            print("Best parametr: %.4f" % args.best_par)
         if 'optimizer' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
             args.start_epoch = checkpoint['epoch'] + 1 # start from next epoch
