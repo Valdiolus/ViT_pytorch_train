@@ -47,7 +47,7 @@ mixed_precision=False
 #for time correction
 gmt_dst = 2
 
-BATCH_SIZE = 128 if mixed_precision else 5
+BATCH_SIZE = 128 if mixed_precision else 16
 ACCUM_ITER = int(4096/BATCH_SIZE)
 workers = 8
 EPOCHS = 100
@@ -134,7 +134,6 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
             correct_top5 = 0
             correct_top1 = 0
             #for inputs, labels in dataloader:
-            iter = 0
             with tqdm(dataloaders[phase], leave=False, desc=f"{phase} iter") as tepoch:
                 tepoch.set_description(f"Epoch {epoch+1}/{num_epochs}, {phase} iter")
                 for data_iter_step, data in enumerate(tepoch):
@@ -161,7 +160,7 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                     loss_value = loss.item()
                     preds = torch.argmax(outputs, 1)
                     #print("preds:", preds.shape, "outputs:", outputs.shape, "labels:", labels.shape)
-                    #print("data_iter_step", data_iter_step)
+                    print("data_iter_step", data_iter_step)
                     
                     if not math.isfinite(loss_value):
                         print("Loss is {}, stopping training".format(loss_value))
@@ -171,7 +170,11 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                     loss /= accum_iter
                     lr = optimizer.param_groups[0]["lr"]
 
-                    iter += 1
+                    processed_data += inputs.size(0)
+                    running_loss += loss_value * inputs.size(0)
+                    running_corrects += torch.sum(preds == labels.data)
+                    running_accuracy=(running_corrects/processed_data)
+
                     if phase == "train":
                         if mixed_precision:
                             loss_scaler(loss, optimizer, clip_grad=args.clip_grad,
@@ -184,20 +187,14 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                         if (data_iter_step + 1) % accum_iter == 0:
                             optimizer.zero_grad()
                             #print("zero grad")
-                        
-                        processed_data += inputs.size(0)
-                        running_loss += loss_value * inputs.size(0)
-                        running_corrects += torch.sum(preds == labels.data)
-
-                        running_accuracy=(running_corrects/(BATCH_SIZE*iter))
-                        
+                                                    
                         tepoch.set_postfix(loss=loss_value, accuracy=running_accuracy.item())
 
                     if phase == "val":
                         iter_top1 = 0
                         iter_top5 = 0
 
-                        iter_top1 += torch.sum(preds == labels.data)
+                        iter_top1 += running_corrects
                         iter_top5 += iter_top1
 
                         for _ in range(4):
@@ -206,14 +203,9 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                             preds = torch.argmax(outputs, 1)
                             iter_top5 += torch.sum(preds == labels.data)
                         
-                        processed_data += inputs.size(0)
                         correct_top1 += iter_top1
                         correct_top5 += iter_top5
-
-                        running_loss += loss_value * inputs.size(0)
-                        running_corrects += iter_top1
-
-                        tepoch.set_postfix(top1=(correct_top1 / processed_data).item(), top5=(correct_top5 / processed_data).item())
+                        tepoch.set_postfix(loss=loss_value, top1=(correct_top1 / processed_data).item(), top5=(correct_top5 / processed_data).item())
             
             epoch_loss = running_loss / dataset_sizes[phase]
             epoch_acc = running_corrects / dataset_sizes[phase]
@@ -221,7 +213,7 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
             if phase == 'train':
                 epoch_losses_train = epoch_loss
                 epoch_accuracy_train = epoch_acc
-                wandb.log({"train": {"epoch loss": epoch_loss, "epoch accuracy": epoch_acc}})
+                wandb.log({"train": {"loss": epoch_loss, "accuracy": epoch_acc, "lr": lr}})
                 
             if phase == 'val':
                 epoch_losses_val = epoch_loss
@@ -232,8 +224,6 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                 correct_top1 = correct_top1.item() / processed_data
                 correct_top5 = correct_top5.item() / processed_data
 
-                torch.save(model.state_dict(), os.path.join(train_path, "last.pt"))
-
                 if correct_top1 > args.best_par:
                     save_best = True
                     args.best_par = correct_top1
@@ -241,8 +231,6 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                     save_best = False
 
                 misc.save_model(args, epoch, model, optimizer, loss_scaler, train_path, save_best)
-                print("Epoch:", epoch+1, "train loss:", running_loss, "lr:", lr)
-
                 wandb.log({"val": {"loss": epoch_losses_val, "top1 accuracy": correct_top1, "top5 accuracy": correct_top5}})
 
         #calculate avaerage loss for epoch
@@ -385,7 +373,7 @@ if __name__ == '__main__':
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
-    imagenet_data = {x: torchvision.datasets.ImageFolder(os.path.join(imagenet_dir, x), transform=data_transforms_train if x=='train' else data_transforms_val)
+    imagenet_data = {x: torchvision.datasets.ImageFolder(os.path.join(imagenet_dir, x+'_100'), transform=data_transforms_train if x=='train' else data_transforms_val)
                     for x in ['train', 'val']}
     data_loaders = {x: torch.utils.data.DataLoader(imagenet_data[x], batch_size=args.batch_size, shuffle=True, num_workers=workers)
                     for x in ['train', 'val']}
