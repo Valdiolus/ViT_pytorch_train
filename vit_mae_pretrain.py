@@ -158,9 +158,9 @@ def train(args, model, dataloaders, optimizer, loss_scaler, num_epochs=10):
 
         #calculate avaerage loss for epoch
         running_loss /= processed_data
-        if running_loss < args.best_loss:
+        if running_loss < args.best_par:
             save_best = True
-            args.best_loss = running_loss
+            args.best_par = running_loss
         else:
             save_best = False
         misc.save_model(args, epoch, model, optimizer, loss_scaler, train_path, save_best)
@@ -181,7 +181,7 @@ if __name__ == '__main__':
     parser.add_argument("--resume", required=False, help="run id to resume")
     parser.add_argument("--start_epoch", default=0, type=int, help="resumed epoch")
     parser.add_argument("--wandb_id", default=1, type=int, help="wandb id to resume")
-    parser.add_argument("--best_loss", default=BEST_LOSS, type=float, help="previous best loss")
+    parser.add_argument("--best_par", default=BEST_LOSS, type=float, help="previous best loss")
     parser.add_argument("--epochs", default=EPOCHS, type=int, help="number of warmup_epochs")
     parser.add_argument("--warmup_epochs", default=WARMUP_EPOCHS, type=int, help="number of warmup_epochs")
     parser.add_argument('--lr', type=float, default=None, metavar='LR',

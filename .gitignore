@@ -1,0 +1,4 @@
+runs/*
+__*
+wandb/*
+*_imagenet.txt

@@ -42,26 +42,22 @@ import argparse
 import PIL
 
 #use fp16
-mixed_precision=False
+mixed_precision=True
 
 #for time correction
 gmt_dst = 2
 
-BATCH_SIZE = 128 if mixed_precision else 16
-ACCUM_ITER = int(4096/BATCH_SIZE)
+BATCH_SIZE = 64 if mixed_precision else 16
+ACCUM_ITER = int(1024/BATCH_SIZE)
 workers = 8
 EPOCHS = 100
-WARMUP_EPOCHS = 1
+WARMUP_EPOCHS = 5
 BEST_ACC = 0.0
+MIXUP_DEFAULT = 0
+CUTMIX_DEFAULT = 0
 input_size = 224
-init_lr = 0.05
+init_lr = 5e-4
 init_weight_decay = 0.05
-
-load_from_file = 0
-saved_model = ''
-wandb_saved_id = 0
-norm_pixel_loss=True
-mask_ratio=0.75
 
 model_type = 'base'
 
@@ -73,13 +69,14 @@ wandb_config = {"batch_size": BATCH_SIZE,
                 "num_workers": workers,
                 "input size": input_size,
                 "epochs": EPOCHS,
-                "pin_memory": False,  
                 "precision": 16 if mixed_precision else 32,
-                "optimizer": "Adam",
-                "lr": init_lr,
+                "optimizer": "AdamW",
+                "blr": init_lr,
                 "weight_decay": init_weight_decay,
                 "aug": "no",
-                "warmup_epochs": WARMUP_EPOCHS
+                "warmup_epochs": WARMUP_EPOCHS,
+                "mixup": MIXUP_DEFAULT,
+                "cutmix": CUTMIX_DEFAULT,
                 }
 
 def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epochs=10, mixup_fn=None):
@@ -99,9 +96,9 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
     if args.resume:
         saved_epochs = args.start_epoch
         print("wandb id:", args.wandb_id)
-        train_path = os.path.join(PATH_TO_SAVE, saved_model)
+        train_path = os.path.join(PATH_TO_SAVE, args.resume)
         wandb.init(id=args.wandb_id, resume=True, project="ViT finetune", name = args.resume, config=wandb_config)
-        print("Resume training:", saved_model)
+        print("Resume training:", args.resume)
     else:
         time_struct = time.gmtime()
         time_now = str(time_struct.tm_year)+'-'+str(time_struct.tm_mon)+'-'+str(time_struct.tm_mday)+'_'+str(time_struct.tm_hour+gmt_dst)+'-'+str(time_struct.tm_min)+'-'+str(time_struct.tm_sec)
@@ -159,16 +156,18 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                     
                     loss_value = loss.item()
                     preds = torch.argmax(outputs, 1)
-                    #print("preds:", preds.shape, "outputs:", outputs.shape, "labels:", labels.shape)
-                    print("data_iter_step", data_iter_step)
                     
                     if not math.isfinite(loss_value):
                         print("Loss is {}, stopping training".format(loss_value))
                         quit()
 
-                    #save_inference_images(inputs, outputs)
                     loss /= accum_iter
-                    lr = optimizer.param_groups[0]["lr"]
+                    #lr = optimizer.param_groups[0]["lr"]
+                    min_lr = 10.
+                    max_lr = 0.
+                    for group in optimizer.param_groups:
+                        min_lr = min(min_lr, group["lr"])
+                        max_lr = max(max_lr, group["lr"])
 
                     processed_data += inputs.size(0)
                     running_loss += loss_value * inputs.size(0)
@@ -194,7 +193,7 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                         iter_top1 = 0
                         iter_top5 = 0
 
-                        iter_top1 += running_corrects
+                        iter_top1 += torch.sum(preds == labels.data)
                         iter_top5 += iter_top1
 
                         for _ in range(4):
@@ -213,7 +212,7 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
             if phase == 'train':
                 epoch_losses_train = epoch_loss
                 epoch_accuracy_train = epoch_acc
-                wandb.log({"train": {"loss": epoch_loss, "accuracy": epoch_acc, "lr": lr}})
+                wandb.log({"train": {"loss": epoch_loss, "accuracy": epoch_acc, "lr": max_lr}})
                 
             if phase == 'val':
                 epoch_losses_val = epoch_loss
@@ -233,9 +232,6 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                 misc.save_model(args, epoch, model, optimizer, loss_scaler, train_path, save_best)
                 wandb.log({"val": {"loss": epoch_losses_val, "top1 accuracy": correct_top1, "top5 accuracy": correct_top5}})
 
-        #calculate avaerage loss for epoch
-        #wandb.log({"train": {"loss": running_loss, "lr": lr}})
-        #wandb.log({"train": {"loss": running_loss, "accuracy": running_accuracy.item(), "lr": lr}})
         processed_data = 0
         print("\nEpoch %s/%s" % (epoch+1, num_epochs), "train acc", "{:.4f}".format(epoch_accuracy_train), "train loss", "{:.4f}".format(epoch_losses_train), 
                                                        "val loss", "{:.4f}".format(epoch_losses_val), "val top1:", correct_top1, "val top5:", correct_top5)
@@ -267,11 +263,11 @@ if __name__ == '__main__':
     #LR
     parser.add_argument('--lr', type=float, default=None, metavar='LR',
                         help='learning rate (absolute lr)')
-    parser.add_argument('--blr', type=float, default=1.5e-4, metavar='LR',
+    parser.add_argument('--blr', type=float, default=init_lr, metavar='LR',
                         help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
-    parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
+    parser.add_argument('--min_lr', type=float, default=1e-6, metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
-    parser.add_argument('--layer_decay', type=float, default=0.75,
+    parser.add_argument('--layer_decay', type=float, default=0.65,
                         help='layer-wise lr decay from ELECTRA/BEiT')
     
     #Batch size
@@ -285,9 +281,9 @@ if __name__ == '__main__':
                         help='weight decay (default: 0.05)')
 
     #Mixup params
-    parser.add_argument('--mixup', type=float, default=0,
+    parser.add_argument('--mixup', type=float, default=MIXUP_DEFAULT,
                         help='mixup alpha, mixup enabled if > 0.')
-    parser.add_argument('--cutmix', type=float, default=0,
+    parser.add_argument('--cutmix', type=float, default=CUTMIX_DEFAULT,
                         help='cutmix alpha, cutmix enabled if > 0.')
     parser.add_argument('--cutmix_minmax', type=float, nargs='+', default=None,
                         help='cutmix min/max ratio, overrides alpha and enables cutmix if set (default: None)')
@@ -313,11 +309,7 @@ if __name__ == '__main__':
 
     if args.lr is None:  # only base_lr is specified
         args.lr = args.blr * eff_batch_size / 256
-        #args.lr = args.blr * 4096 / 256
-
-    saved_model = args.resume
-    if saved_model is not None:
-        load_from_file = True
+        #args.lr = args.blr * 1024 / 256
 
     wandb_config["lr"] = args.lr
 
@@ -373,7 +365,7 @@ if __name__ == '__main__':
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
-    imagenet_data = {x: torchvision.datasets.ImageFolder(os.path.join(imagenet_dir, x+'_100'), transform=data_transforms_train if x=='train' else data_transforms_val)
+    imagenet_data = {x: torchvision.datasets.ImageFolder(os.path.join(imagenet_dir, x), transform=data_transforms_train if x=='train' else data_transforms_val)
                     for x in ['train', 'val']}
     data_loaders = {x: torch.utils.data.DataLoader(imagenet_data[x], batch_size=args.batch_size, shuffle=True, num_workers=workers)
                     for x in ['train', 'val']}
@@ -420,10 +412,10 @@ if __name__ == '__main__':
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print(msg)
 
-        if args.global_pool:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        else:
-            assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
+        #if args.global_pool:
+        #    assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
+        #else:
+        #    assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
 
         # manually initialize fc layer
         trunc_normal_(model.head.weight, std=2e-5)
