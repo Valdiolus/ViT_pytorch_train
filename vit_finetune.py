@@ -53,8 +53,8 @@ workers = 8
 EPOCHS = 100
 WARMUP_EPOCHS = 5
 BEST_ACC = 0.0
-MIXUP_DEFAULT = 0
-CUTMIX_DEFAULT = 0
+MIXUP_DEFAULT = 0.8
+CUTMIX_DEFAULT = 1.0
 input_size = 224
 init_lr = 5e-4
 init_weight_decay = 0.05
@@ -138,21 +138,28 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                         lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(dataloaders) + epoch, args)
                     
                     inputs, labels = data
+                    #print(inputs.size(), labels.size())
 
                     if train_on_gpu:
                         inputs = inputs.to(device)
                         labels = labels.to(device)
 
                     if mixup_fn is not None:
-                        samples, targets = mixup_fn(samples, targets)
+                        inputs, labels_long = mixup_fn(inputs, labels)
 
                     if mixed_precision:
                         with torch.autocast(device_type='cuda', dtype=torch.float16):
                             outputs = model(inputs) #logits, mask, ids_restore, hidden_states=None, attentions=None
-                            loss = criterion(outputs, labels)
+                            if mixup_fn is not None:
+                                loss = criterion(outputs, labels_long)
+                            else:
+                                loss = criterion(outputs, labels)
                     else:
                         outputs = model(inputs)
-                        loss = criterion(outputs, labels)
+                        if mixup_fn is not None:
+                            loss = criterion(outputs, labels_long)
+                        else:
+                            loss = criterion(outputs, labels)
                     
                     loss_value = loss.item()
                     preds = torch.argmax(outputs, 1)
@@ -325,7 +332,7 @@ if __name__ == '__main__':
         print('CUDA is available! Training on GPU ...')
         train_on_gpu = True
         mixed_precision=True
-        cudnn.benchmark = True # only if input size is not changing
+        #cudnn.benchmark = True # only if input size is not changing
         device = torch.device("cuda")
         with open("cuda_datapath_imagenet.txt", 'r') as f:
             imagenet_dir = f.read()
@@ -367,7 +374,7 @@ if __name__ == '__main__':
         ])
     imagenet_data = {x: torchvision.datasets.ImageFolder(os.path.join(imagenet_dir, x), transform=data_transforms_train if x=='train' else data_transforms_val)
                     for x in ['train', 'val']}
-    data_loaders = {x: torch.utils.data.DataLoader(imagenet_data[x], batch_size=args.batch_size, shuffle=True, num_workers=workers)
+    data_loaders = {x: torch.utils.data.DataLoader(imagenet_data[x], batch_size=args.batch_size, shuffle=True, num_workers=workers, drop_last=True if x=='train' else False)
                     for x in ['train', 'val']}
     dataset_sizes = {x: len(imagenet_data[x]) for x in ['train', 'val']}
     class_names = imagenet_data['train'].classes
@@ -412,10 +419,10 @@ if __name__ == '__main__':
         msg = model.load_state_dict(checkpoint_model, strict=False)
         print(msg)
 
-        #if args.global_pool:
-        #    assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
-        #else:
-        #    assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
+        if args.global_pool:
+            assert set(msg.missing_keys) == {'head.weight', 'head.bias', 'fc_norm.weight', 'fc_norm.bias'}
+        else:
+            assert set(msg.missing_keys) == {'head.weight', 'head.bias'}
 
         # manually initialize fc layer
         trunc_normal_(model.head.weight, std=2e-5)
@@ -446,4 +453,4 @@ if __name__ == '__main__':
 
     misc.load_model(args=args, model=model, optimizer=optimizer, loss_scaler=loss_scaler)
 
-    train(args, model, data_loaders, optimizer, criterion, loss_scaler, EPOCHS)
+    train(args, model, data_loaders, optimizer, criterion, loss_scaler, EPOCHS, mixup_fn=mixup_fn)
