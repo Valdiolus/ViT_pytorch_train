@@ -300,32 +300,32 @@ def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
 def save_model(args, epoch, model, optimizer, loss_scaler, output_dir, save_best):
     if loss_scaler is not None:
         to_save = {
-            'model': deepcopy(model.state_dict()),
-            'optimizer': deepcopy(optimizer.state_dict()),
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
             'epoch': epoch,
-            'scaler': deepcopy(loss_scaler.state_dict()),
+            'scaler': loss_scaler.state_dict(),
             'wandb_id': args.wandb_id,
             'best_loss': args.best_par,
         }
     else:
         to_save = {
-            'model': deepcopy(model.state_dict()),
-            'optimizer': deepcopy(optimizer.state_dict()),
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
             'epoch': epoch,
             #'scaler': loss_scaler.state_dict(),
             'wandb_id': args.wandb_id,
             'best_loss': args.best_par,
         }
     #save_on_master(to_save, checkpoint_path)
-    torch.save(to_save, os.path.join(output_dir, "last.pt"))
+    torch.save(to_save, os.path.join(output_dir, "last.pth"))
     if save_best:
         #print("Saving best model!")
-        torch.save(to_save, os.path.join(output_dir, "best.pt"))
+        torch.save(to_save, os.path.join(output_dir, "best.pth"))
 
 
 def load_model(args, model, optimizer, loss_scaler):
     if args.resume:
-        checkpoint = torch.load(os.path.join(os.path.join('./runs', args.resume), "last.pt"), map_location='cpu')
+        checkpoint = torch.load(os.path.join(os.path.join('./runs', args.resume), "last.pth"), map_location='cpu')
         model.load_state_dict(checkpoint['model'])
         print("Resume checkpoint %s" % args.resume)
         if checkpoint['best_loss']:

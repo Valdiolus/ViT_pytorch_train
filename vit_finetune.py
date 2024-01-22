@@ -53,8 +53,8 @@ workers = 8
 EPOCHS = 100
 WARMUP_EPOCHS = 5
 BEST_ACC = 0.0
-MIXUP_DEFAULT = 0.8
-CUTMIX_DEFAULT = 1.0
+MIXUP_DEFAULT = 0
+CUTMIX_DEFAULT = 0
 input_size = 224
 init_lr = 5e-4
 init_weight_decay = 0.05
@@ -223,10 +223,6 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                 
             if phase == 'val':
                 epoch_losses_val = epoch_loss
-
-                with open(os.path.join(train_path, "hyp.txt"), 'w') as f:
-                    f.write(str(epoch+1)) # +1 because of new epoch - current is done 
-                    f.close()
                 correct_top1 = correct_top1.item() / processed_data
                 correct_top5 = correct_top5.item() / processed_data
 
@@ -244,7 +240,7 @@ def train(args, model, dataloaders, optimizer, criterion, loss_scaler, num_epoch
                                                        "val loss", "{:.4f}".format(epoch_losses_val), "val top1:", correct_top1, "val top5:", correct_top5)
         
     time_elapsed = time.time() - time_beginning
-    print('Training complete in {:.0f}h {:.0f}m {:.0f}s'.format(time_elapsed // 3600, time_elapsed // 60, time_elapsed % 60))
+    print('Training complete in {:.0f}h {:.0f}m {:.0f}s'.format(time_elapsed // 3600, (time_elapsed // 60) - (time_elapsed // 3600)*60, time_elapsed % 60))
     print('Best val Acc: {:4f}'.format(args.best_par))
     print("Final top1:", correct_top1, "top5:", correct_top5)
 
